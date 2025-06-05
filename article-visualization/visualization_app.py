@@ -7,7 +7,7 @@ import datetime
 # Streamlit config
 st.set_page_config(page_title="News Visualizer", layout="wide")
 st.title("Maryland News Articles Visualization Dashboard")
-st.markdown("This dashboard visualizes articles from the Capital Gazette, Hyattsville Wire, and Baltimore Banner. Use the filters to explore different sources and date ranges. Data was collected starting on April 28th, however, the Hyattsville wire had articles dated well prior to then that we were able to still collect.")
+st.markdown("This dashboard visualizes articles from the Capital Gazette, Hyattsville Wire, and Baltimore Banner. Use the filters to explore different sources and date ranges. Data was collected starting on April 28th, 2025, however, the Hyattsville wire had articles dated well prior to then that we were able to still collect.")
 st.markdown("""
 **Developed by the Data Visualization team at the Digital Engagement Lab**  
 **Directed by:** Noah Der Garabedian  
