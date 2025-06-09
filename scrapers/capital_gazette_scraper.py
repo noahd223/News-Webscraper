@@ -153,6 +153,7 @@ def parse_article(url: str) -> dict:
         "images": image_info,
         "num_ads_est": ad_count,
         "text": text,  # Add the article text to the returned data
+        "date_scraped": datetime.utcnow().isoformat(),
     }
 
 
@@ -192,8 +193,8 @@ def main(
                 insert_query = """
                 INSERT INTO capitol_gazette
                 (section, url, pub_date, headline, headline_len,
-                 word_count, num_links, num_images, num_ads_est, images, article_text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 word_count, num_links, num_images, num_ads_est, images, article_text, date_scraped)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING;
                 """
 
@@ -209,6 +210,7 @@ def main(
                     data.get("num_ads_est"),
                     json.dumps(data.get("images")),
                     data.get("text"),
+                    data.get("date_scraped"),
                 ))
 
                 existing_urls.add(url)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import re, json, time, itertools, logging
 from collections import Counter
 from datetime import datetime
+import pytz
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 import csv
@@ -19,10 +20,10 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 
 SECTIONS = {
-    "https://www.thebaltimorebanner.com/topic/politics-power/": "politics",
-    "https://www.thebaltimorebanner.com/topic/economy/": "business",
-    "https://www.thebaltimorebanner.com/topic/sports/": "sports",
-    "https://www.thebaltimorebanner.com/topic/education/": "education",
+    "https://www.thebaltimoreBanner.com/topic/politics-power/": "politics",
+    "https://www.thebaltimoreBanner.com/topic/economy/": "business",
+    "https://www.thebaltimoreBanner.com/topic/sports/": "sports",
+    "https://www.thebaltimoreBanner.com/topic/education/": "education",
 }
 
 HEADERS = {
@@ -71,7 +72,7 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
     }[label]
 
     pattern = re.compile(
-        rf"^https://www\.thebaltimorebanner\.com/{section_prefix}/.+-[A-Z0-9]{{15,}}/$"
+        rf"^https://www\.thebaltimoreBanner\.com/{section_prefix}/.+-[A-Z0-9]{{15,}}/$"
     )
 
     while page_url:
@@ -80,7 +81,7 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
             href = a["href"]
             if href.startswith("/"):
                 href = urljoin(section_url, href)
-            if href.startswith("https://www.thebaltimorebanner.com/"):
+            if href.startswith("https://www.thebaltimoreBanner.com/"):
                 href = href.split("#")[0]  # remove fragments like #comments-header
                 #print(f"Found link: {href}")
                 if pattern.search(href):
@@ -163,6 +164,8 @@ def parse_article(url: str) -> dict:
 
     # comments -- SKIPPED (since you don't want it anymore)
 
+    eastern = pytz.timezone('US/Eastern')
+    date_scraped = datetime.now(eastern).isoformat()
     return {
         "url": url,
         "headline": headline,
@@ -173,6 +176,7 @@ def parse_article(url: str) -> dict:
         "num_images": num_images,
         "images": image_info,
         "num_ads_est": ad_count,
+        "date_scraped": date_scraped,
     }
 
 
@@ -210,8 +214,8 @@ def main(
                 insert_query = """
                 INSERT INTO baltimore_banner
                 (section, url, pub_date, headline, headline_len,
-                 word_count, num_links, num_images, num_ads_est, images)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 word_count, num_links, num_images, num_ads_est, images, date_scraped)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING;
                 """
 
@@ -226,6 +230,7 @@ def main(
                     data.get("num_images"),
                     data.get("num_ads_est"),
                     json.dumps(data.get("images")),
+                    data.get("date_scraped"),
                 ))
 
                 existing_urls.add(url)
