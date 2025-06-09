@@ -1,20 +1,22 @@
+# capital_gazette_scraper.py
 from __future__ import annotations
-import re, json, time, itertools, logging
-from collections import Counter
+import re, json, time, logging
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 import csv
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from dateutil import parser as dt_parser
 from PIL import Image
 from io import BytesIO
 from tqdm import tqdm
 import psycopg2
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
 
 SECTIONS = {
     "https://www.capitalgazette.com/news/politics/": "politics",
@@ -24,7 +26,6 @@ SECTIONS = {
 }
 
 HEADERS = {
-    # Chrome-ish UA avoids the site’s robots block
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -43,17 +44,6 @@ def get_soup(url: str) -> BeautifulSoup:
     resp.raise_for_status()
     return BeautifulSoup(resp.text, "html.parser")
 
-def load_existing_links(csv_path: str) -> set[str]:
-    """Load already scraped article URLs from an existing CSV."""
-    if not Path(csv_path).exists():
-        return set()
-    existing_links = set()
-    with Path(csv_path).open("r", encoding="utf-8") as fp:
-        reader = csv.DictReader(fp)
-        for row in reader:
-            existing_links.add(row["url"])
-    return existing_links
-
 
 def get_all_page_links(section_url: str, label: str) -> list[str]:
     """Collect ONLY real article links from a section page based on section type."""
@@ -71,30 +61,23 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
             if href.startswith("/"):
                 href = urljoin(section_url, href)
             if href.startswith("https://www.capitalgazette.com/"):
-                href = href.split("#")[0]  # remove fragments like #comments-header
+                href = href.split("#")[0]
                 if pattern.search(href):
                     links.add(href)
-        # no "Load More" button probably, so just exit after first page
-        page_url = None  
+        # only one page for Capital Gazette
+        page_url = None
         time.sleep(0.8)
 
     return sorted(links)
 
 
-
-
-
-
-
-
 def get_image_dims(src: str) -> tuple[int | None, int | None]:
-    """Return (width, height) or (None, None) if not obtainable quickly."""
     try:
         r = SESSION.get(src, timeout=15)
         r.raise_for_status()
         with Image.open(BytesIO(r.content)) as im:
             return im.width, im.height
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None, None
 
 
@@ -113,10 +96,27 @@ def parse_article(url: str) -> dict:
     word_count = len(text.split())
 
     # links
-    links_in_body = [a["href"] for p in paragraphs for a in p.find_all("a", href=True)]
+    links_in_body = [
+        a["href"]
+        for p in paragraphs
+        for a in p.find_all("a", href=True)
+    ]
     num_links = len(links_in_body)
 
-    # images (count <img> and <svg> tags)
+    # NEW: split into internal vs external
+    parsed_base = urlparse(url)
+    base_domain = parsed_base.netloc
+    internal_links = 0
+    external_links = 0
+    for href in links_in_body:
+        full_url = urljoin(url, href)
+        dom = urlparse(full_url).netloc
+        if dom == "" or dom == base_domain:
+            internal_links += 1
+        else:
+            external_links += 1
+
+    # images (img + svg)
     imgs = soup.select("div.body-copy img")
     svgs = soup.select("div.body-copy svg")
     image_info = []
@@ -130,9 +130,9 @@ def parse_article(url: str) -> dict:
             w, h = get_image_dims(src)
         image_info.append({"src": src, "width": w, "height": h, "type": "img"})
     for svg in svgs:
-        # For SVGs, we can store the outer HTML as a string for reference
         svg_html = str(svg)
-        image_info.append({"src": None, "width": None, "height": None, "type": "svg", "svg_html": svg_html})
+        image_info.append({"src": None, "width": None, "height": None,
+                           "type": "svg", "svg_html": svg_html})
     num_images = len(image_info)
 
     # date
@@ -149,21 +149,21 @@ def parse_article(url: str) -> dict:
         "pub_date": pub_date,
         "word_count": word_count,
         "num_links": num_links,
+        "internal_links": internal_links,   # NEW
+        "external_links": external_links,   # NEW
         "num_images": num_images,
         "images": image_info,
         "num_ads_est": ad_count,
-        "text": text,  # Add the article text to the returned data
+        "article_text": text,
     }
 
 
-
-
 # ------------- main -------------------------------------------------------- #
-def main(
-    limit_per_section: int | None = None,
-):
+def main(limit_per_section: int | None = None):
     conn = psycopg2.connect(
-        "postgresql://scraperdb_owner:npg_mbyWDf3q5rFp@ep-still-snowflake-a4l5opga-pooler.us-east-1.aws.neon.tech/scraperdb?sslmode=require"
+        "postgresql://scraperdb_owner:npg_mbyWDf3q5rFp@"
+        "ep-still-snowflake-a4l5opga-pooler.us-east-1.aws.neon.tech/"
+        "scraperdb?sslmode=require"
     )
     conn.autocommit = True
     cur = conn.cursor()
@@ -189,14 +189,15 @@ def main(
                 data = parse_article(url)
                 data["section"] = label
 
+                # ─── INSERT WITH INTERNAL/EXTERNAL LINKS ─────────────────
                 insert_query = """
                 INSERT INTO capitol_gazette
                 (section, url, pub_date, headline, headline_len,
-                 word_count, num_links, num_images, num_ads_est, images, article_text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 word_count, num_links, internal_links, external_links,
+                 num_images, num_ads_est, images, article_text)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING;
                 """
-
                 cur.execute(insert_query, (
                     data.get("section"),
                     data.get("url"),
@@ -205,16 +206,21 @@ def main(
                     data.get("headline_len"),
                     data.get("word_count"),
                     data.get("num_links"),
+                    data.get("internal_links"),   # NEW
+                    data.get("external_links"),   # NEW
                     data.get("num_images"),
                     data.get("num_ads_est"),
                     json.dumps(data.get("images")),
-                    data.get("text"),
+                    data.get("article_text"),
                 ))
+                # ──────────────────────────────────────────────────────────
 
                 existing_urls.add(url)
                 new_articles_count += 1
+
             except Exception as exc:
                 logging.warning("Failed %s: %s", url, exc)
+
             time.sleep(0.6)
 
     cur.close()
@@ -222,7 +228,16 @@ def main(
     logging.info("DONE – wrote to Neon database.")
     print(f"New articles scraped: {new_articles_count}")
 
-
-
 if __name__ == "__main__":
-    main()   # remove limit when you’re satisfied
+    # ─── DEBUG TEST for internal/external link counting ────────────────
+    # Pick a real Capital Gazette article URL that you know exists:
+    test_url = "https://www.capitalgazette.com/2025/04/28/anne-arundel-special-tax-districts-boards-deny-secrecy-overspending-claims/"
+    data = parse_article(test_url)
+    print("URL:             ", data["url"])
+    print("Total links:     ", data["num_links"])
+    print("Internal links:  ", data["internal_links"])
+    print("External links:  ", data["external_links"])
+    import sys; sys.exit(0)
+#if __name__ == "__main__":
+   # main()  # remove limit when you’re satisfied
+ 

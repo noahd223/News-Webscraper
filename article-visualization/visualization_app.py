@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 from sqlalchemy import create_engine
 import datetime
+from urllib.parse import urlparse, urljoin
+from bs4 import BeautifulSoup
 
 # Streamlit config
 st.set_page_config(page_title="News Visualizer", layout="wide")
@@ -127,6 +129,7 @@ fig_time_bar_daily = px.bar(
 )
 st.plotly_chart(fig_time_bar_daily, use_container_width=True)
 
+
 st.subheader("✍️ Headline Length Box Plot")
 fig_headline = px.box(
     filtered,
@@ -188,6 +191,24 @@ fig_links = px.box(
     labels={"num_links": "Number of Links", "source": "News Source"}
 )
 st.plotly_chart(fig_links, use_container_width=True)
+
+
+# Internal links
+fig_int = px.box(filtered, x="source", y="internal_links", points="all",
+                 title="Internal Links per Article by Source")
+st.plotly_chart(fig_int, use_container_width=True)
+# External links
+fig_ext = px.box(filtered, x="source", y="external_links", points="all",
+                 title="External Links per Article by Source")
+st.plotly_chart(fig_ext, use_container_width=True)
+
+st.subheader("🧮 Average Link Counts by Source")
+avg_links = filtered.groupby("source")[['internal_links','external_links']].mean().reset_index()
+fig_avg = px.bar(avg_links, x="source", y=["internal_links","external_links"], barmode="group",
+                 labels={"value":"Avg # Links","variable":"Link Type"},
+                 title="Average Internal vs External Links by Source")
+st.plotly_chart(fig_avg, use_container_width=True)
+
 
 
 # 📚 Section Popularity Over Time (Excludes Hyattsville Wire)

@@ -1,5 +1,4 @@
-# Baltimore Banner scraper, we realized that the paywall wasn't allowing us to scrape completely
-# accurate data, so we decided not to use it in the visualization.
+# Baltimore Banner scraper, paywall data is spotty so we use this only for link counts
 from __future__ import annotations
 import re, json, time, itertools, logging
 from collections import Counter
@@ -15,8 +14,10 @@ from io import BytesIO
 from tqdm import tqdm
 import psycopg2
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
 
 SECTIONS = {
     "https://www.thebaltimorebanner.com/topic/politics-power/": "politics",
@@ -26,7 +27,6 @@ SECTIONS = {
 }
 
 HEADERS = {
-    # Chrome-ish UA avoids the site’s robots block
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -45,6 +45,7 @@ def get_soup(url: str) -> BeautifulSoup:
     resp.raise_for_status()
     return BeautifulSoup(resp.text, "html.parser")
 
+
 def load_existing_links(csv_path: str) -> set[str]:
     """Load already scraped article URLs from an existing CSV."""
     if not Path(csv_path).exists():
@@ -62,7 +63,6 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
     links: set[str] = set()
     page_url = section_url
 
-    # 🔥 Dynamically build the regex based on the section label
     section_prefix = {
         "politics": "politics-power",
         "business": "economy",
@@ -81,26 +81,15 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
             if href.startswith("/"):
                 href = urljoin(section_url, href)
             if href.startswith("https://www.thebaltimorebanner.com/"):
-                href = href.split("#")[0]  # remove fragments like #comments-header
-                #print(f"Found link: {href}")
+                href = href.split("#")[0]
                 if pattern.search(href):
                     links.add(href)
-        # handle pagination
         nxt = soup.select_one("a[data-cy='load-more']")
         page_url = urljoin(section_url, nxt["href"]) if nxt else None
         time.sleep(0.8)
-    
-    #print("\n=== Final filtered list of links ===")
-    #for link in sorted(links):
-        #print(link)
+
     print(f"=== Total article links collected: {len(links)} ===\n")
-    
     return sorted(links)
-
-
-
-
-
 
 
 def get_image_dims(src: str) -> tuple[int | None, int | None]:
@@ -110,7 +99,7 @@ def get_image_dims(src: str) -> tuple[int | None, int | None]:
         r.raise_for_status()
         with Image.open(BytesIO(r.content)) as im:
             return im.width, im.height
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None, None
 
 
@@ -121,7 +110,7 @@ def parse_article(url: str) -> dict:
     # headline
     headline_tag = soup.select_one("h1.headline strong")
     headline = headline_tag.get_text(strip=True) if headline_tag else ""
-    headline_len = len(headline.split())   
+    headline_len = len(headline.split())
 
     # word count
     paragraphs = soup.select("div.article-body p[data-testid='text-container']")
@@ -131,6 +120,20 @@ def parse_article(url: str) -> dict:
     # links
     links_in_body = [a["href"] for p in paragraphs for a in p.find_all("a", href=True)]
     num_links = len(links_in_body)
+
+    # NEW: split into internal vs. external
+    parsed_base = urlparse(url)
+    base_domain = parsed_base.netloc
+
+    internal_links = 0
+    external_links = 0
+    for href in links_in_body:
+        full_url = urljoin(url, href)
+        dom = urlparse(full_url).netloc
+        if dom == "" or dom == base_domain:
+            internal_links += 1
+        else:
+            external_links += 1
 
     # images
     imgs = soup.select("div.article-body img")
@@ -161,8 +164,6 @@ def parse_article(url: str) -> dict:
     # ads
     ad_count = len(soup.select("div[id^='arcad-feature']"))
 
-    # comments -- SKIPPED (since you don't want it anymore)
-
     return {
         "url": url,
         "headline": headline,
@@ -170,19 +171,19 @@ def parse_article(url: str) -> dict:
         "pub_date": pub_date,
         "word_count": word_count,
         "num_links": num_links,
+        "internal_links": internal_links,   # NEW
+        "external_links": external_links,   # NEW
         "num_images": num_images,
         "images": image_info,
         "num_ads_est": ad_count,
     }
 
 
-
 # ------------- main -------------------------------------------------------- #
-def main(
-    limit_per_section: int | None = None,
-):
+def main(limit_per_section: int | None = None):
     conn = psycopg2.connect(
-        "postgresql://scraperdb_owner:npg_mbyWDf3q5rFp@ep-still-snowflake-a4l5opga-pooler.us-east-1.aws.neon.tech/scraperdb?sslmode=require"
+        "postgresql://scraperdb_owner:npg_mbyWDf3q5rFp@"
+        "ep-still-snowflake-a4l5opga-pooler.us-east-1.aws.neon.tech/scraperdb?sslmode=require"
     )
     conn.autocommit = True
     cur = conn.cursor()
@@ -207,14 +208,15 @@ def main(
                 data = parse_article(url)
                 data["section"] = label
 
+                # ─── INSERT WITH INTERNAL/EXTERNAL LINKS ─────────────────
                 insert_query = """
                 INSERT INTO baltimore_banner
                 (section, url, pub_date, headline, headline_len,
-                 word_count, num_links, num_images, num_ads_est, images)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 word_count, num_links, internal_links, external_links,
+                 num_images, num_ads_est, images)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING;
                 """
-
                 cur.execute(insert_query, (
                     data.get("section"),
                     data.get("url"),
@@ -223,14 +225,19 @@ def main(
                     data.get("headline_len"),
                     data.get("word_count"),
                     data.get("num_links"),
+                    data.get("internal_links"),
+                    data.get("external_links"),
                     data.get("num_images"),
                     data.get("num_ads_est"),
                     json.dumps(data.get("images")),
                 ))
+                # ──────────────────────────────────────────────────────────
 
                 existing_urls.add(url)
+
             except Exception as exc:
                 logging.warning("Failed %s: %s", url, exc)
+
             time.sleep(0.6)
 
     cur.close()
@@ -238,7 +245,6 @@ def main(
     logging.info("DONE – wrote to Neon database.")
 
 
-
-
 if __name__ == "__main__":
     main(limit_per_section=50)   # remove limit when you’re satisfied
+

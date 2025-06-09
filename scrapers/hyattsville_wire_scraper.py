@@ -1,18 +1,17 @@
+# Hyattsville Wire Scraper with internal/external link counting
 from __future__ import annotations
-import re, json, time, itertools, logging
-from collections import Counter
+import re, json, time, logging
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 import csv
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from dateutil import parser as dt_parser
 from PIL import Image
 from io import BytesIO
 from tqdm import tqdm
 import psycopg2
-
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
@@ -37,18 +36,14 @@ HEADERS = {
     )
 }
 
-
 SESSION = requests.Session()
 SESSION.headers.update(HEADERS)
-
 
 # ------------- helpers ----------------------------------------------------- #
 def get_soup(url: str) -> BeautifulSoup:
     resp = SESSION.get(url, timeout=20)
     resp.raise_for_status()
     return BeautifulSoup(resp.text, "html.parser")
-
-
 
 
 def get_all_page_links(section_url: str, label: str) -> list[str]:
@@ -66,10 +61,9 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
             href = a["href"]
             if href.startswith("/"):
                 href = urljoin(section_url, href)
-            href = href.split("#")[0]  # remove URL fragments
+            href = href.split("#")[0]
             if pattern.match(href):
                 links.add(href)
-        # The site doesn't paginate visibly, so stop after one page
         page_url = None
         time.sleep(0.8)
 
@@ -77,15 +71,13 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
 
 
 def get_image_dims(src: str) -> tuple[int | None, int | None]:
-    """Return (width, height) or (None, None) if not obtainable quickly."""
     try:
         r = SESSION.get(src, timeout=15)
         r.raise_for_status()
         with Image.open(BytesIO(r.content)) as im:
             return im.width, im.height
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None, None
-
 
 # ------------- article extractor ------------------------------------------ #
 def parse_article(url: str) -> dict:
@@ -104,6 +96,19 @@ def parse_article(url: str) -> dict:
     # links
     links_in_body = [a["href"] for p in paragraphs for a in p.find_all("a", href=True)]
     num_links = len(links_in_body)
+
+    # NEW: split into internal vs external
+    parsed_base = urlparse(url)
+    base_domain = parsed_base.netloc
+    internal_links = 0
+    external_links = 0
+    for href in links_in_body:
+        full_url = urljoin(url, href)
+        dom = urlparse(full_url).netloc
+        if dom == "" or dom == base_domain:
+            internal_links += 1
+        else:
+            external_links += 1
 
     # images
     imgs = soup.select("div.entry-content img")
@@ -133,23 +138,20 @@ def parse_article(url: str) -> dict:
         "pub_date": pub_date,
         "word_count": word_count,
         "num_links": num_links,
+        "internal_links": internal_links,   # NEW
+        "external_links": external_links,   # NEW
         "num_images": num_images,
         "images": image_info,
         "num_ads_est": ad_count,
         "text": text,
     }
 
-
-
-
-
-
 # ------------- main -------------------------------------------------------- #
 def main(
     limit_per_section: int | None = None,
 ):
     conn = psycopg2.connect(
-        "postgresql://scraperdb_owner:npg_mbyWDf3q5rFp@ep-still-snowflake-a4l5opga-pooler.us-east-1.aws.neon.tech/scraperdb?sslmode=require"
+        "postgresql://scraperdb_owner:npg_mbyWDf3rFp@ep-still-snowflake-a4l5opga-pooler.us-east-1.aws.neon.tech/scraperdb?sslmode=require"
     )
     conn.autocommit = True
     cur = conn.cursor()
@@ -178,11 +180,10 @@ def main(
                 insert_query = """
                 INSERT INTO hyattsville_wire
                 (section, url, pub_date, headline, headline_len,
-                word_count, num_links, num_images, num_ads_est, images, text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 word_count, num_links, internal_links, external_links, num_images, num_ads_est, images, text)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING;
                 """
-
                 cur.execute(insert_query, (
                     data.get("section"),
                     data.get("url"),
@@ -191,12 +192,13 @@ def main(
                     data.get("headline_len"),
                     data.get("word_count"),
                     data.get("num_links"),
+                    data.get("internal_links"),   # NEW
+                    data.get("external_links"),   # NEW
                     data.get("num_images"),
                     data.get("num_ads_est"),
                     json.dumps(data.get("images")),
                     data.get("text"),
                 ))
-
 
                 existing_urls.add(url)
                 new_articles_count += 1
@@ -209,7 +211,15 @@ def main(
     logging.info("DONE – wrote to Neon database.")
     print(f"New articles scraped: {new_articles_count}")
 
-
-
 if __name__ == "__main__":
-    main()
+    # ─── DEBUG TEST for internal/external link counting ────────────────
+    # Replace with any real Hyattsville Wire article URL you know exists:
+    test_url = "https://hyattsvillewire.com/2025/03/17/fbi-headquarters-greenbelt-trump/"
+    data = parse_article(test_url)
+    print("URL:             ", data["url"])
+    print("Total links:     ", data["num_links"])
+    print("Internal links:  ", data["internal_links"])
+    print("External links:  ", data["external_links"])
+    import sys; sys.exit(0)
+#if __name__ == "__main__":
+   # main()
