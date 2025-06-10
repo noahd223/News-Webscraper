@@ -1,15 +1,14 @@
 # Baltimore Banner scraper, we realized that the paywall wasn't allowing us to scrape completely
-# accurate data, so we decided not to use it in the visualization.
+# accurate data, so we decided not certain data points like images on the visualization.
 from __future__ import annotations
-import re, json, time, itertools, logging
-from collections import Counter
+import re, json, time, logging
 from datetime import datetime
-import pytz
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 import csv
+import zoneinfo
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from dateutil import parser as dt_parser
 from PIL import Image
 from io import BytesIO
@@ -162,9 +161,9 @@ def parse_article(url: str) -> dict:
     # ads
     ad_count = len(soup.select("div[id^='arcad-feature']"))
 
-    # comments -- SKIPPED (since you don't want it anymore)
+    # Use local timezone (US/Eastern) without pytz
 
-    eastern = pytz.timezone('US/Eastern')
+    eastern = zoneinfo.ZoneInfo('America/New_York')
     date_scraped = datetime.now(eastern).isoformat()
     return {
         "url": url,
@@ -241,8 +240,6 @@ def main(
     cur.close()
     conn.close()
     logging.info("DONE – wrote to Neon database.")
-
-
 
 
 if __name__ == "__main__":

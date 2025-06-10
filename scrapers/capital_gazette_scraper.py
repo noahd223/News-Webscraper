@@ -1,12 +1,11 @@
 from __future__ import annotations
-import re, json, time, itertools, logging
-from collections import Counter
+import re, json, time, logging
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 import csv
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from dateutil import parser as dt_parser
 from PIL import Image
 from io import BytesIO
@@ -74,7 +73,7 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
                 href = href.split("#")[0]  # remove fragments like #comments-header
                 if pattern.search(href):
                     links.add(href)
-        # no "Load More" button probably, so just exit after first page
+        
         page_url = None  
         time.sleep(0.8)
 
@@ -94,7 +93,7 @@ def get_image_dims(src: str) -> tuple[int | None, int | None]:
         r.raise_for_status()
         with Image.open(BytesIO(r.content)) as im:
             return im.width, im.height
-    except Exception:  # noqa: BLE001
+    except Exception:  
         return None, None
 
 
@@ -139,7 +138,7 @@ def parse_article(url: str) -> dict:
     meta_date = soup.find("meta", attrs={"property": "article:published_time"})
     pub_date = meta_date["content"] if meta_date else None
 
-    # ads estimate
+    # ads estimate - currently a placeholder -- FIX
     ad_count = len(soup.select("div[id^='arcad-feature']"))
 
     return {

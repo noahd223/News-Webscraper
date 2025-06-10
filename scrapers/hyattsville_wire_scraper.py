@@ -1,12 +1,11 @@
 from __future__ import annotations
-import re, json, time, itertools, logging
-from collections import Counter
+import re, json, time, logging
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 import csv
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from dateutil import parser as dt_parser
 from PIL import Image
 from io import BytesIO
@@ -47,7 +46,6 @@ def get_soup(url: str) -> BeautifulSoup:
     resp = SESSION.get(url, timeout=20)
     resp.raise_for_status()
     return BeautifulSoup(resp.text, "html.parser")
-
 
 
 
@@ -123,7 +121,7 @@ def parse_article(url: str) -> dict:
     meta_date = soup.find("meta", attrs={"property": "article:published_time"})
     pub_date = meta_date["content"] if meta_date else None
 
-    # ads (optional placeholder)
+    # ads (placeholder)
     ad_count = 0
 
     return {
