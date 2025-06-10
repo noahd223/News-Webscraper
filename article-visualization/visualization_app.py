@@ -273,6 +273,30 @@ else:
 
 st.plotly_chart(fig_weekday_source, use_container_width=True)
 
+#  Headline Type Visualization
+st.subheader(" Headline Types by News Source")
+
+headline_df = filtered[
+    filtered["source"].isin(["Capital Gazette", "Baltimore Banner"])
+].dropna(subset=["headline_type"])
+
+if headline_df.empty:
+    st.info("No headline type data available in the selected filters.")
+else:
+    headline_counts = (
+        headline_df.groupby(["source", "headline_type"]).size().reset_index(name="count")
+    )
+
+    fig_headline_type = px.bar(
+        headline_counts,
+        x="headline_type",
+        y="count",
+        color="source",
+        barmode="group",
+        title="Headline Type Distribution by News Source",
+        labels={"headline_type": "Headline Type", "count": "Number of Headlines", "source": "News Source"}
+    )
+    st.plotly_chart(fig_headline_type, use_container_width=True)
 
 # Footer
 st.markdown("---")
