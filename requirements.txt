@@ -10,3 +10,9 @@ torch
 pytz
 datasets>=2.18.0
 scikit-learn
+pydeck
+geopy
+spacy
+tqdm
+selenium
+webdriver-manager
