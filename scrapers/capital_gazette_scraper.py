@@ -172,7 +172,7 @@ def main(
     cur = conn.cursor()
 
     existing_urls = set()
-    cur.execute("SELECT url FROM capitol_gazette;")
+    cur.execute("SELECT url FROM capital_gazette;")
     for row in cur.fetchall():
         existing_urls.add(row[0])
 
@@ -193,7 +193,7 @@ def main(
                 data["section"] = label
 
                 insert_query = """
-                INSERT INTO capitol_gazette
+                INSERT INTO capital_gazette
                 (section, url, pub_date, headline, headline_len,
                  word_count, num_links, num_images, ad_count, images, article_text, date_scraped)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
