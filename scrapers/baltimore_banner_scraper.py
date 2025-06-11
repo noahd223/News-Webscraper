@@ -10,7 +10,6 @@ import zoneinfo
 import requests
 from bs4 import BeautifulSoup
 from dateutil import parser as dt_parser
-from io import BytesIO
 from tqdm import tqdm
 import psycopg2
 
