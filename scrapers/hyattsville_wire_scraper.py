@@ -7,7 +7,6 @@ import csv
 import requests
 from bs4 import BeautifulSoup
 from dateutil import parser as dt_parser
-from PIL import Image
 from io import BytesIO
 from tqdm import tqdm
 import psycopg2
@@ -74,15 +73,7 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
     return sorted(links)
 
 
-def get_image_dims(src: str) -> tuple[int | None, int | None]:
-    """Return (width, height) or (None, None) if not obtainable quickly."""
-    try:
-        r = SESSION.get(src, timeout=15)
-        r.raise_for_status()
-        with Image.open(BytesIO(r.content)) as im:
-            return im.width, im.height
-    except Exception:  # noqa: BLE001
-        return None, None
+
 
 
 # ------------- article extractor ------------------------------------------ #
@@ -112,8 +103,6 @@ def parse_article(url: str) -> dict:
             continue
         w = img.get("width")
         h = img.get("height")
-        if not (w and h):
-            w, h = get_image_dims(src)
         image_info.append({"src": src, "width": w, "height": h})
     num_images = len(image_info)
 

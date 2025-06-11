@@ -3,7 +3,10 @@ pandas
 sqlalchemy
 psycopg2-binary
 plotly
-pydeck
-geopy
-spacy
 tqdm
+bs4
+transformers
+torch
+pytz
+datasets>=2.18.0
+scikit-learn
