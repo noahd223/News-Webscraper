@@ -12,6 +12,10 @@ from bs4 import BeautifulSoup
 from dateutil import parser as dt_parser
 from tqdm import tqdm
 import psycopg2
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
@@ -24,7 +28,7 @@ SECTIONS = {
 }
 
 HEADERS = {
-    # Chrome-ish UA avoids the site’s robots block
+    # Chrome-ish UA avoids the site's robots block
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -106,66 +110,84 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
 
 # ------------- article extractor ------------------------------------------ #
 def parse_article(url: str) -> dict:
-    soup = get_soup(url)
+    # Set up headless Chrome
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    try:
+        driver.get(url)
+        time.sleep(3)  # wait for JS to load ads
+        rendered_html = driver.page_source
+        soup = BeautifulSoup(rendered_html, "html.parser")
 
-    # headline
-    headline_tag = soup.select_one("h1.headline strong")
-    headline = headline_tag.get_text(strip=True) if headline_tag else ""
-    headline_len = len(headline.split())   
+        # headline
+        headline_tag = soup.select_one("h1.headline strong")
+        headline = headline_tag.get_text(strip=True) if headline_tag else ""
+        headline_len = len(headline.split())   
 
-    # word count
-    paragraphs = soup.select("div.article-body p[data-testid='text-container']")
-    text = " ".join(p.get_text(strip=True) for p in paragraphs)
-    word_count = len(text.split())
+        # word count
+        paragraphs = soup.select("div.article-body p[data-testid='text-container']")
+        text = " ".join(p.get_text(strip=True) for p in paragraphs)
+        word_count = len(text.split())
 
-    # links
-    links_in_body = [a["href"] for p in paragraphs for a in p.find_all("a", href=True)]
-    num_links = len(links_in_body)
+        # links
+        links_in_body = [a["href"] for p in paragraphs for a in p.find_all("a", href=True)]
+        num_links = len(links_in_body)
 
-    # images
-    imgs = soup.select("div.article-body img")
-    image_info = []
-    for img in imgs:
-        src = img.get("src")
-        if not src:
-            continue
-        w = img.get("width")
-        h = img.get("height")
-        # Need to fix this later
-        image_info.append({"src": src, "width": w, "height": h})
-    num_images = len(image_info)
+        # images
+        imgs = soup.select("div.article-body img")
+        image_info = []
+        for img in imgs:
+            src = img.get("src")
+            if not src:
+                continue
+            w = img.get("width")
+            h = img.get("height")
+            # Need to fix this later
+            image_info.append({"src": src, "width": w, "height": h})
+        num_images = len(image_info)
 
-    # date
-    date_tag = soup.select_one("span[data-testid='attribution-date__published']")
-    if date_tag:
-        date_text = date_tag.get_text(strip=True)
-        try:
-            pub_date = dt_parser.parse(date_text, fuzzy=True).isoformat()
-        except Exception:
-            pub_date = None
-    else:
-        meta_date = soup.find("meta", attrs={"property": "article:published_time"})
-        pub_date = meta_date["content"] if meta_date else None
+        # date
+        date_tag = soup.select_one("span[data-testid='attribution-date__published']")
+        if date_tag:
+            date_text = date_tag.get_text(strip=True)
+            try:
+                pub_date = dt_parser.parse(date_text, fuzzy=True).isoformat()
+            except Exception:
+                pub_date = None
+        else:
+            meta_date = soup.find("meta", attrs={"property": "article:published_time"})
+            pub_date = meta_date["content"] if meta_date else None
 
-    # ads
-    ad_count = len(soup.select("div[id^='arcad-feature']"))
+        # ads
+        # get outermost ad containers
+        arcad_divs = soup.find_all("div", id=lambda x: x and x.startswith("arcad_"))
+        ads_block_divs = soup.find_all("div", class_=lambda x: x and "ads-block" in x)
+        # avoid double counting ads
+        ad_containers = set(arcad_divs) | set(ads_block_divs)
+        ad_count = len(ad_containers)
 
-    # Use local timezone (US/Eastern) without pytz
-
-    eastern = zoneinfo.ZoneInfo('America/New_York')
-    date_scraped = datetime.now(eastern).isoformat()
-    return {
-        "url": url,
-        "headline": headline,
-        "headline_len": headline_len,
-        "pub_date": pub_date,
-        "word_count": word_count,
-        "num_links": num_links,
-        "num_images": num_images,
-        "images": image_info,
-        "num_ads_est": ad_count,
-        "date_scraped": date_scraped,
-    }
+        # Use local timezone (US/Eastern) without pytz
+        eastern = zoneinfo.ZoneInfo('America/New_York')
+        date_scraped = datetime.now(eastern).isoformat()
+        return {
+            "url": url,
+            "headline": headline,
+            "headline_len": headline_len,
+            "pub_date": pub_date,
+            "word_count": word_count,
+            "num_links": num_links,
+            "num_images": num_images,
+            "images": image_info,
+            "ad_count": ad_count,
+            "date_scraped": date_scraped,
+            "html_content": rendered_html,
+        }
+    finally:
+        driver.quit()
 
 
 
@@ -202,7 +224,7 @@ def main(
                 insert_query = """
                 INSERT INTO baltimore_banner
                 (section, url, pub_date, headline, headline_len,
-                 word_count, num_links, num_images, num_ads_est, images, date_scraped)
+                 word_count, num_links, num_images, ad_count, images, date_scraped)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING;
                 """
@@ -216,7 +238,7 @@ def main(
                     data.get("word_count"),
                     data.get("num_links"),
                     data.get("num_images"),
-                    data.get("num_ads_est"),
+                    data.get("ad_count"),
                     json.dumps(data.get("images")),
                     data.get("date_scraped"),
                 ))
@@ -232,4 +254,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main(limit_per_section=50)   # remove limit when you’re satisfied
+    main(limit_per_section=50)   # remove limit when you're satisfied

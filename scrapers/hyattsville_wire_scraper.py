@@ -10,21 +10,25 @@ from dateutil import parser as dt_parser
 from io import BytesIO
 from tqdm import tqdm
 import psycopg2
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 
 SECTIONS = {
-    "https://www.hyattsvillewire.com/woodridge/": "woodridge",
-    "https://www.hyattsvillewire.com/riverdale-park/": "riverdale-park",
-    "https://www.hyattsvillewire.com/college-park/": "college-park",
-    "https://www.hyattsvillewire.com/mount-rainier/": "mount-rainier",
-    "https://www.hyattsvillewire.com/brentwood/": "brentwood",
-    "https://www.hyattsvillewire.com/bladensburg/": "bladensburg",
-    "https://www.hyattsvillewire.com/edmonston/": "edmonston",
-    "https://www.hyattsvillewire.com/hyattsville/": "hyattsville",
-    "https://www.hyattsvillewire.com/greenbelt/": "greenbelt",
+    "https://www.hyattsvillewire.com/category/woodridge/": "woodridge",
+    "https://www.hyattsvillewire.com/category/riverdale-park/": "riverdale-park",
+    "https://www.hyattsvillewire.com/category/college-park/": "college-park",
+    "https://www.hyattsvillewire.com/category/mount-rainier/": "mount-rainier",
+    "https://www.hyattsvillewire.com/category/brentwood/": "brentwood",
+    "https://www.hyattsvillewire.com/category/bladensburg/": "bladensburg",
+    "https://www.hyattsvillewire.com/category/edmonston/": "edmonston",
+    "https://www.hyattsvillewire.com/category/hyattsville/": "hyattsville",
+    "https://www.hyattsvillewire.com/category/greenbelt/": "greenbelt",
 }
 
 HEADERS = {
@@ -53,8 +57,9 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
     links: set[str] = set()
     page_url = section_url
 
+    # Pattern to match article URLs: https://hyattsvillewire.com/YYYY/MM/DD/article-title/
     pattern = re.compile(
-        r"^https://www\.hyattsvillewire\.com/\d{4}/\d{2}/\d{2}/[^/]+/?$"
+        r"^https://hyattsvillewire\.com/\d{4}/\d{2}/\d{2}/[^/]+/?$"
     )
 
     while page_url:
@@ -66,10 +71,12 @@ def get_all_page_links(section_url: str, label: str) -> list[str]:
             href = href.split("#")[0]  # remove URL fragments
             if pattern.match(href):
                 links.add(href)
+                logging.debug(f"Found article link: {href}")
         # The site doesn't paginate visibly, so stop after one page
         page_url = None
         time.sleep(0.8)
 
+    logging.info(f"Found {len(links)} articles in section {label}")
     return sorted(links)
 
 
@@ -110,8 +117,37 @@ def parse_article(url: str) -> dict:
     meta_date = soup.find("meta", attrs={"property": "article:published_time"})
     pub_date = meta_date["content"] if meta_date else None
 
-    # ads (placeholder)
-    ad_count = 0
+    # selenium for ads
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    try:
+        driver.get(url)
+        time.sleep(3)  # wait for js to load ads
+        
+        # count all ads
+        ad_elements = []
+        # look for common ad classes
+        ad_elements.extend(driver.find_elements("css selector", "div[class*='ad-']"))
+        ad_elements.extend(driver.find_elements("css selector", "div[class*='ads-']"))
+        ad_elements.extend(driver.find_elements("css selector", "div[class*='advertisement']"))
+        # look for ad iframes
+        ad_elements.extend(driver.find_elements("css selector", "iframe[src*='ad']"))
+        # look for ad aria labels
+        ad_elements.extend(driver.find_elements("css selector", "[aria-label*='ad']"))
+        # look for google adsense
+        ad_elements.extend(driver.find_elements("css selector", "ins.adsbygoogle"))
+        
+        # avoid duplicate ads
+        ad_count = len(set(ad_elements))
+        
+        #  get the html
+        rendered_html = driver.page_source
+    finally:
+        driver.quit()
 
     return {
         "url": url,
@@ -122,9 +158,10 @@ def parse_article(url: str) -> dict:
         "num_links": num_links,
         "num_images": num_images,
         "images": image_info,
-        "num_ads_est": ad_count,
+        "ad_count": ad_count,
         "text": text,
         "date_scraped": datetime.utcnow().isoformat(),
+        "html_content": rendered_html,
     }
 
 
@@ -166,7 +203,7 @@ def main(
                 insert_query = """
                 INSERT INTO hyattsville_wire
                 (section, url, pub_date, headline, headline_len,
-                word_count, num_links, num_images, num_ads_est, images, text, date_scraped)
+                word_count, num_links, num_images, ad_count, images, text, date_scraped)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING;
                 """
@@ -180,7 +217,7 @@ def main(
                     data.get("word_count"),
                     data.get("num_links"),
                     data.get("num_images"),
-                    data.get("num_ads_est"),
+                    data.get("ad_count"),
                     json.dumps(data.get("images")),
                     data.get("text"),
                     data.get("date_scraped"),

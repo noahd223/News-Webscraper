@@ -10,6 +10,10 @@ from dateutil import parser as dt_parser
 from io import BytesIO
 from tqdm import tqdm
 import psycopg2
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
@@ -22,7 +26,7 @@ SECTIONS = {
 }
 
 HEADERS = {
-    # Chrome-ish UA avoids the site’s robots block
+    # Chrome-ish UA avoids the site's robots block
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -125,8 +129,20 @@ def parse_article(url: str) -> dict:
     meta_date = soup.find("meta", attrs={"property": "article:published_time"})
     pub_date = meta_date["content"] if meta_date else None
 
-    # ads estimate - currently a placeholder -- FIX
-    ad_count = len(soup.select("div[id^='arcad-feature']"))
+    # selenium for ad detection
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    try:
+        driver.get(url)
+        time.sleep(3)
+        ad_divs = driver.find_elements("css selector", "div[class*='htl-ad']")
+        ad_count = len(ad_divs)
+    finally:
+        driver.quit()
 
     return {
         "url": url,
@@ -137,8 +153,8 @@ def parse_article(url: str) -> dict:
         "num_links": num_links,
         "num_images": num_images,
         "images": image_info,
-        "num_ads_est": ad_count,
-        "text": text,  # Add the article text to the returned data
+        "ad_count": ad_count,
+        "text": text,
         "date_scraped": datetime.utcnow().isoformat(),
     }
 
@@ -179,7 +195,7 @@ def main(
                 insert_query = """
                 INSERT INTO capitol_gazette
                 (section, url, pub_date, headline, headline_len,
-                 word_count, num_links, num_images, num_ads_est, images, article_text, date_scraped)
+                 word_count, num_links, num_images, ad_count, images, article_text, date_scraped)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (url) DO NOTHING;
                 """
@@ -193,7 +209,7 @@ def main(
                     data.get("word_count"),
                     data.get("num_links"),
                     data.get("num_images"),
-                    data.get("num_ads_est"),
+                    data.get("ad_count"),
                     json.dumps(data.get("images")),
                     data.get("text"),
                     data.get("date_scraped"),
@@ -213,4 +229,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main()   # remove limit when you’re satisfied
+    main()   # remove limit when you're satisfied
