@@ -19,7 +19,7 @@ def load_data():
     engine = create_engine(
         "postgresql+psycopg2://scraperdb_owner:npg_mbyWDf3q5rFp@ep-still-snowflake-a4l5opga-pooler.us-east-1.aws.neon.tech/scraperdb?sslmode=require"
     )
-    cg = pd.read_sql_query("SELECT * FROM capitol_gazette;", engine)
+    cg = pd.read_sql_query("SELECT * FROM capital_gazette;", engine)
     hw = pd.read_sql_query("SELECT * FROM hyattsville_wire;", engine)
     bb = pd.read_sql_query("SELECT * FROM baltimore_banner;", engine)
     cg["source"] = "Capital Gazette"
