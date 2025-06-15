@@ -7,7 +7,7 @@ import datetime
 # Streamlit config
 st.set_page_config(page_title="News Visualizer", layout="wide")
 st.title("Maryland News Articles Visualization Dashboard")
-st.markdown("This dashboard visualizes articles from the Capital Gazette, Hyattsville Wire, and Baltimore Banner. Use the filters to explore different sources and date ranges. Data was collected starting on April 28th, 2025, however, the Hyattsville Wire had articles dated well prior to then that we were able to still collect.")
+st.markdown("This dashboard visualizes articles from the Capital Gazette, Hyattsville Wire, and Baltimore Banner. Use the filters to explore different sources and date ranges.")
 st.markdown("""
 **Developed by the Data Visualization team at the Digital Engagement Lab**  
 **Directed by:** Noah Der Garabedian  
@@ -274,29 +274,29 @@ else:
 st.plotly_chart(fig_weekday_source, use_container_width=True)
 
 #  Headline Type Visualization
-st.subheader(" Headline Types by News Source")
+#st.subheader(" Headline Types by News Source")
 
-headline_df = filtered[
-    filtered["source"].isin(["Capital Gazette", "Baltimore Banner"])
-].dropna(subset=["headline_type"])
+#headline_df = filtered[
+#    filtered["source"].isin(["Capital Gazette", "Baltimore Banner"])
+#].dropna(subset=["headline_type"])
 
-if headline_df.empty:
-    st.info("No headline type data available in the selected filters.")
-else:
-    headline_counts = (
-        headline_df.groupby(["source", "headline_type"]).size().reset_index(name="count")
-    )
+#if headline_df.empty:
+ #   st.info("No headline type data available in the selected filters.")
+#else:
+#    headline_counts = (
+#        headline_df.groupby(["source", "headline_type"]).size().reset_index(name="count")
+#    )
 
-    fig_headline_type = px.bar(
-        headline_counts,
-        x="headline_type",
-        y="count",
-        color="source",
-        barmode="group",
-        title="Headline Type Distribution by News Source",
-        labels={"headline_type": "Headline Type", "count": "Number of Headlines", "source": "News Source"}
-    )
-    st.plotly_chart(fig_headline_type, use_container_width=True)
+#    fig_headline_type = px.bar(
+#        headline_counts,
+#        x="headline_type",
+#        y="count",
+#        color="source",
+#        barmode="group",
+#        title="Headline Type Distribution by News Source",
+#        labels={"headline_type": "Headline Type", "count": "Number of Headlines", "source": "News Source"}
+#    )
+#    st.plotly_chart(fig_headline_type, use_container_width=True)
 
 # Footer
 st.markdown("---")
